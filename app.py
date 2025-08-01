@@ -10,9 +10,10 @@ import dash_bootstrap_components as dbc
 # --- Initialize app ---
 app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 app.title = "Calabria Wildfire Dashboard"
+server = app.server  # ✅ Required for gunicorn
 
 # --- Load and prepare data ---
-gdf = gpd.read_file("E:\CIMA_internship\new project Paolo\fires_calabria3035\calabria_fires_3035.shp")
+gdf = gpd.read_file("data/calabria_fires_3035.shp")  # ✅ Use relative path
 gdf = gdf.to_crs(epsg=3857)
 gdf["geometry"] = gdf.geometry.apply(lambda g: g if g.is_valid else g.buffer(0))
 gdf["area_ha"] = gdf.geometry.area / 10_000
@@ -112,38 +113,4 @@ def update_dashboard(year_range):
     summary = (
         f"🔥 Total Fires: {total_fires:,}	🌍 Burned Area: {total_area:,.0f} ha\n\n"
         f"🗓️ Peak Year by # of Fires: {peak_year_by_fires} ({peak_fires_count} fires)\n"
-        f"🗓️ Peak Year by Burned Area: {peak_year_by_area} ({peak_area_value:,.0f} ha)"
-    )
-
-    return fig1, fig2, summary
-
-@app.callback(Output("circle-matrix", "figure"), Input("year-slider", "value"))
-def circle_matrix(year_range):
-    df = gdf[(gdf["year"] >= year_range[0]) & (gdf["year"] <= year_range[1])]
-    all_months = pd.DataFrame({"month": list(range(1, 13)), "key": 1})
-    all_years = pd.DataFrame({"year": list(range(year_range[0], year_range[1] + 1)), "key": 1})
-    full_grid = pd.merge(all_years, all_months, on="key").drop("key", axis=1)
-    grouped = df.groupby(["year", "month"]).agg(count=("area_ha", "count"), area=("area_ha", "sum")).reset_index()
-    grid = pd.merge(full_grid, grouped, on=["year", "month"], how="left").fillna(0)
-    max_area = grid["area"].max()
-    max_count = grid["count"].max()
-    grid["radius"] = np.sqrt(grid["area"] / max_area) * 40 if max_area else 1
-    grid["color_scale"] = grid["count"] / max_count if max_count else 0
-
-    fig = px.scatter(
-        grid, x="month", y="year", size="radius", color="color_scale",
-        color_continuous_scale="YlOrRd", size_max=40,
-        range_color=(0, 1),
-        labels={"month": "Month", "year": "Year", "color_scale": "Relative Fire Count<br>(normalized to 0–1)"},
-        title="🔘 Circle Matrix: Burned Area & Fire Count"
-    )
-    fig.update_layout(
-        yaxis=dict(autorange="reversed"),
-        xaxis=dict(tickmode="array", tickvals=list(range(1, 13)), ticktext=[
-            "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
-        ])
-    )
-    return fig
-
-# --- Run the app ---
-app.run(debug=True, port=8075)
+        f"🗓️ Peak Year by Burned Area: {peak_year_by_area} ({peak_area_value:,.0
