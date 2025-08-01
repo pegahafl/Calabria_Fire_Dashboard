@@ -18,10 +18,11 @@ print("📂 Working directory:", os.getcwd())
 print("📁 Files in /data:", os.listdir("data"))
 
 gdf = gpd.read_file("data/calabria_fires_3035.shp")
-gdf = gdf.to_crs(epsg=3857)
+gdf = gdf.to_crs(epsg=3857)  # Web Mercator for area calculation
 gdf["geometry"] = gdf.geometry.apply(lambda g: g if g.is_valid else g.buffer(0))
-gdf["area_ha"] = gdf.geometry.area / 10_000
+gdf["area_ha"] = gdf.geometry.area / 10_000  # m² to hectares
 
+# 🔍 Clean and format
 gdf["date"] = pd.to_datetime(gdf["FIREDATE"], errors="coerce")
 gdf.dropna(subset=["date", "area_ha"], inplace=True)
 gdf["year"] = gdf["date"].dt.year
@@ -30,7 +31,7 @@ gdf["year_month"] = gdf["date"].dt.to_period("M").astype(str)
 gdf["season"] = gdf["month"].apply(lambda m: "Summer" if 5 <= m <= 10 else "Winter")
 gdf["size"] = gdf["area_ha"].apply(lambda a: "Big" if a > 100 else "Small")
 
-# --- Layout ---
+# --- App Layout ---
 app.layout = dbc.Container([
     html.H2("🔥 Calabria Wildfire Explorer", className="text-center mt-4 mb-3"),
     dcc.Tabs([
@@ -46,19 +47,23 @@ app.layout = dbc.Container([
                     )
                 ], md=12)
             ], className="mb-4"),
+
             dbc.Row([
                 dbc.Col(dcc.Graph(id="timeseries-chart"), md=6),
                 dbc.Col(dcc.Graph(id="map-chart"), md=6)
             ]),
+
             html.Div(id="summary-box", className="mt-3")
         ]),
         dcc.Tab(label="🔘 Circle Matrix Grid", children=[
-            dcc.Graph(id="circle-matrix")
+            dcc.Graph(id="circle-matrix", figure=go.Figure(
+                layout=dict(title="🧪 Placeholder – Circle Matrix Grid")
+            ))
         ])
     ])
 ], fluid=True)
 
-# --- Dashboard callback ---
+# --- Callbacks ---
 @app.callback(
     Output("timeseries-chart", "figure"),
     Output("map-chart", "figure"),
@@ -68,11 +73,10 @@ app.layout = dbc.Container([
 def update_dashboard(year_range):
     df = gdf[(gdf["year"] >= year_range[0]) & (gdf["year"] <= year_range[1])].copy()
 
-    # Time Series
+    # 📈 Time Series
     ts = df.groupby(["year", "month"]).agg(area=("area_ha", "sum")).reset_index()
     ts["month_name"] = pd.to_datetime(ts["month"], format="%m").dt.strftime("%b")
-    month_order = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    month_order = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     ts["month_name"] = pd.Categorical(ts["month_name"], categories=month_order, ordered=True)
     ts = ts.sort_values(["year", "month"])
 
@@ -90,12 +94,10 @@ def update_dashboard(year_range):
                  fillcolor="LightBlue", opacity=0.3, layer="below")
         ]
     )
-    fig1.add_trace(go.Scatter(x=[None], y=[None], mode="markers",
-                              marker=dict(size=10, color="LightPink"), name="Summer (May–Oct)"))
-    fig1.add_trace(go.Scatter(x=[None], y=[None], mode="markers",
-                              marker=dict(size=10, color="LightBlue"), name="Winter (Nov–Apr)"))
+    fig1.add_trace(go.Scatter(x=[None], y=[None], mode="markers", marker=dict(size=10, color="LightPink"), name="Summer (May–Oct)"))
+    fig1.add_trace(go.Scatter(x=[None], y=[None], mode="markers", marker=dict(size=10, color="LightBlue"), name="Winter (Nov–Apr)"))
 
-    # Map
+    # 🗺️ Map
     gdf_wgs = df.to_crs(epsg=4326)
     fig2 = px.scatter_mapbox(
         gdf_wgs,
@@ -106,7 +108,7 @@ def update_dashboard(year_range):
         title="🗺️ Fire Locations"
     )
 
-    # Summary
+    # 📦 Summary
     total_fires = len(df)
     total_area = df["area_ha"].sum()
     peak_year_by_fires = df["year"].value_counts().idxmax()
@@ -122,41 +124,35 @@ def update_dashboard(year_range):
 
     return fig1, fig2, html.Pre(summary)
 
-# --- Circle Matrix callback ---
-@app.callback(
-    Output("circle-matrix", "figure"),
-    Input("year-slider", "value")
-)
-def update_circle_matrix(year_range):
-    df = gdf[(gdf["year"] >= year_range[0]) & (gdf["year"] <= year_range[1])].copy()
-    grouped = df.groupby(["year", "month", "size"]).size().reset_index(name="count")
+# --- Run app locally ---
 
-    traces = []
-    for size_cat, color in zip(["Small", "Big"], ["orange", "firebrick"]):
-        subset = grouped[grouped["size"] == size_cat]
-        for _, row in subset.iterrows():
-            traces.append(
-                go.Scatter(
-                    x=[row["year"]], y=[row["month"]],
-                    mode="markers",
-                    marker=dict(size=row["count"] * 2, color=color, opacity=0.5),
-                    name=size_cat if row["month"] == 1 else "",  # Show legend once
-                    showlegend=(row["month"] == 1)
-                )
-            )
+@app.callback(Output("circle-matrix", "figure"), Input("year-slider", "value"))
+def circle_matrix(year_range):
+    df = gdf[(gdf["year"] >= year_range[0]) & (gdf["year"] <= year_range[1])]
+    all_months = pd.DataFrame({"month": list(range(1, 13)), "key": 1})
+    all_years = pd.DataFrame({"year": list(range(year_range[0], year_range[1] + 1)), "key": 1})
+    full_grid = pd.merge(all_years, all_months, on="key").drop("key", axis=1)
+    grouped = df.groupby(["year", "month"]).agg(count=("area_ha", "count"), area=("area_ha", "sum")).reset_index()
+    grid = pd.merge(full_grid, grouped, on=["year", "month"], how="left").fillna(0)
+    max_area = grid["area"].max()
+    max_count = grid["count"].max()
+    grid["radius"] = np.sqrt(grid["area"] / max_area) * 40 if max_area else 1
+    grid["color_scale"] = grid["count"] / max_count if max_count else 0
 
-    fig = go.Figure(data=traces)
-    fig.update_layout(
-        title="🔘 Circle Matrix of Fires by Year, Month, and Size",
-        xaxis_title="Year",
-        yaxis=dict(title="Month", tickvals=list(range(1, 13)),
-                   ticktext=["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                             "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]),
-        template="plotly_white"
+    fig = px.scatter(
+        grid, x="month", y="year", size="radius", color="color_scale",
+        color_continuous_scale="YlOrRd", size_max=40,
+        range_color=(0, 1),
+        labels={"month": "Month", "year": "Year", "color_scale": "Relative Fire Count<br>(normalized to 0–1)"},
+        title="🔘 Circle Matrix: Burned Area & Fire Count"
     )
-
+    fig.update_layout(
+        yaxis=dict(autorange="reversed"),
+        xaxis=dict(tickmode="array", tickvals=list(range(1, 13)), ticktext=[
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+        ])
+    )
     return fig
 
-# --- Run Locally ---
 if __name__ == "__main__":
     app.run_server(debug=True)
