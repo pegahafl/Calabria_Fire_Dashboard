@@ -113,4 +113,5 @@ def update_dashboard(year_range):
     summary = (
         f"🔥 Total Fires: {total_fires:,}	🌍 Burned Area: {total_area:,.0f} ha\n\n"
         f"🗓️ Peak Year by # of Fires: {peak_year_by_fires} ({peak_fires_count} fires)\n"
-        f"🗓️ Peak Year by Burned Area: {peak_year_by_area} ({peak_area_value:,.0
+        f"🗓️ Peak Year by Burned Area: {peak_year_by_area} ({peak_area_value:,.0f} ha)"
+)
